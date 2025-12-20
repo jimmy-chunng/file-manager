@@ -6,6 +6,7 @@
 
 // 配置：文件存储目录
 define('STORAGE_DIR', __DIR__ . '/storage');
+define('MAX_STORAGE_LIMIT', 100 * 1024 * 1024); // 存储限额：100MB
 
 // 初始化存储目录
 if (!is_dir(STORAGE_DIR)) {
@@ -92,6 +93,8 @@ class FileManager
             throw new Exception("文件 '{$filename}' 已存在。");
         }
 
+        $this->checkStorageQuota(strlen($content));
+
         if (file_put_contents($path, $content) === false) {
             throw new Exception("无法写入文件，请检查权限。");
         }
@@ -139,6 +142,7 @@ class FileManager
                 
                 try {
                     $this->validateFilename($name);
+                    $this->checkStorageQuota($files['size'][$i]);
                     $destination = $this->baseDir . '/' . $name;
                     if (move_uploaded_file($tmpName, $destination)) {
                         $successCount++;
@@ -204,6 +208,24 @@ class FileManager
         }
     }
 
+    /**
+     * 检查存储配额
+     */
+    private function checkStorageQuota(int $newSize): void
+    {
+        $currentUsage = 0;
+        $scanned = scandir($this->baseDir);
+        
+        foreach ($scanned as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $currentUsage += filesize($this->baseDir . '/' . $item);
+        }
+
+        if (($currentUsage + $newSize) > MAX_STORAGE_LIMIT) {
+            throw new Exception("存储空间不足！限额: " . $this->formatSize(MAX_STORAGE_LIMIT) . "，当前已用: " . $this->formatSize($currentUsage));
+        }
+    }
+
     private function formatSize($bytes): string
     {
         if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 2) . ' GB';
@@ -226,6 +248,7 @@ $files = $fm->getFiles();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>简易文件管理系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         body { background-color: #f8f9fa; padding-top: 2rem; }
         .container { max-width: 900px; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -239,10 +262,10 @@ $files = $fm->getFiles();
         <h3>📂 在线文件管理</h3>
         <div>
             <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
-                ⬆️ 上传文件
+                <i class="bi bi-cloud-upload"></i> 上传文件
             </button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
-                + 新建文件
+                <i class="bi bi-file-earmark-plus"></i> 新建文件
             </button>
         </div>
     </div>
@@ -277,11 +300,11 @@ $files = $fm->getFiles();
                     <td><?= $file['size'] ?></td>
                     <td><?= $file['time'] ?></td>
                     <td class="text-end">
-                        <a href="?action=download&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn me-1">下载</a>
+                        <a href="?action=download&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn me-1"><i class="bi bi-download"></i> 下载</a>
                         <form method="POST" style="display:inline;" onsubmit="return confirm('确定要删除 <?= htmlspecialchars($file['name']) ?> 吗？');">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="filename" value="<?= htmlspecialchars($file['name']) ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger action-btn">删除</button>
+                            <button type="submit" class="btn btn-sm btn-outline-danger action-btn"><i class="bi bi-trash"></i> 删除</button>
                         </form>
                     </td>
                 </tr>
