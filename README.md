@@ -1,4 +1,4 @@
-A online file manager tools.
+A online file manage tool.
 
 support add/delete/upload file, write by php.
 screen shot:
