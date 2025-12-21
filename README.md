@@ -1,6 +1,8 @@
-A online file manage tool.
+A online file self manage tool.
 
 support add/delete/upload file, write by php.
+
+for my personal use only then share to you guys.
 
 screen shot:
 
