@@ -16,12 +16,17 @@ if (!is_dir(STORAGE_DIR)) {
 class FileManager
 {
     private string $baseDir;
+    private string $relativePath = ''; // 当前相对路径
     public string $message = '';
     public string $messageType = ''; // success or danger
 
     public function __construct(string $dir)
     {
         $this->baseDir = $dir;
+        // 获取并净化当前路径，防止目录遍历
+        $path = $_GET['path'] ?? '';
+        $path = str_replace(['../', '..\\'], '', $path);
+        $this->relativePath = trim($path, '/\\');
     }
 
     /**
@@ -44,6 +49,8 @@ class FileManager
             try {
                 if ($action === 'create') {
                     $this->createFile($_POST['filename'] ?? '', $_POST['content'] ?? '');
+                } elseif ($action === 'create_folder') {
+                    $this->createFolder($_POST['foldername'] ?? '');
                 } elseif ($action === 'delete') {
                     $this->deleteFile($_POST['filename'] ?? '');
                 } elseif ($action === 'upload') {
@@ -62,21 +69,37 @@ class FileManager
     public function getFiles(): array
     {
         $files = [];
-        $scanned = scandir($this->baseDir);
+        $dirs = [];
+        $fullPath = $this->getCurrentPath();
+
+        if (!is_dir($fullPath)) {
+            return [];
+        }
+
+        $scanned = scandir($fullPath);
         
         foreach ($scanned as $item) {
             if ($item === '.' || $item === '..') continue;
             
-            $path = $this->baseDir . '/' . $item;
-            if (is_file($path)) {
-                $files[] = [
-                    'name' => $item,
-                    'size' => $this->formatSize(filesize($path)),
-                    'time' => date('Y-m-d H:i:s', filemtime($path))
-                ];
+            $path = $fullPath . '/' . $item;
+            $isDir = is_dir($path);
+            
+            $data = [
+                'name' => $item,
+                'is_dir' => $isDir,
+                'size' => $isDir ? '-' : $this->formatSize(filesize($path)),
+                'time' => date('Y-m-d H:i:s', filemtime($path))
+            ];
+
+            if ($isDir) {
+                $dirs[] = $data;
+            } else {
+                $files[] = $data;
             }
         }
-        return $files;
+        
+        // 文件夹排在前面
+        return array_merge($dirs, $files);
     }
 
     /**
@@ -87,7 +110,7 @@ class FileManager
         $filename = trim($filename);
         $this->validateFilename($filename);
 
-        $path = $this->baseDir . '/' . $filename;
+        $path = $this->getCurrentPath() . '/' . $filename;
         
         if (file_exists($path)) {
             throw new Exception("文件 '{$filename}' 已存在。");
@@ -104,19 +127,43 @@ class FileManager
     }
 
     /**
+     * 创建文件夹
+     */
+    private function createFolder(string $foldername): void
+    {
+        $foldername = trim($foldername);
+        $this->validateFilename($foldername);
+
+        $path = $this->getCurrentPath() . '/' . $foldername;
+
+        if (file_exists($path)) {
+            throw new Exception("文件夹 '{$foldername}' 已存在。");
+        }
+
+        if (!mkdir($path, 0755)) {
+            throw new Exception("无法创建文件夹，请检查权限。");
+        }
+
+        $this->message = "文件夹 '{$foldername}' 创建成功！";
+        $this->messageType = 'success';
+    }
+
+    /**
      * 删除文件
      */
     private function deleteFile(string $filename): void
     {
         $this->validateFilename($filename);
-        $path = $this->baseDir . '/' . $filename;
+        $path = $this->getCurrentPath() . '/' . $filename;
 
         if (!file_exists($path)) {
-            throw new Exception("文件不存在。");
+            throw new Exception("目标不存在。");
         }
 
-        if (!unlink($path)) {
-            throw new Exception("删除失败，请检查权限。");
+        if (is_dir($path)) {
+            if (!rmdir($path)) throw new Exception("删除失败，文件夹可能不为空。");
+        } else {
+            if (!unlink($path)) throw new Exception("删除失败，请检查权限。");
         }
 
         $this->message = "文件 '{$filename}' 已删除。";
@@ -143,7 +190,7 @@ class FileManager
                 try {
                     $this->validateFilename($name);
                     $this->checkStorageQuota($files['size'][$i]);
-                    $destination = $this->baseDir . '/' . $name;
+                    $destination = $this->getCurrentPath() . '/' . $name;
                     if (move_uploaded_file($tmpName, $destination)) {
                         $successCount++;
                     }
@@ -164,10 +211,15 @@ class FileManager
     private function downloadFile(string $filename): void
     {
         $this->validateFilename($filename);
-        $path = $this->baseDir . '/' . $filename;
+        $path = $this->getCurrentPath() . '/' . $filename;
 
         if (!file_exists($path)) {
             throw new Exception("文件不存在。");
+        }
+
+        if (is_dir($path)) {
+            $this->downloadFolder($path, $filename);
+            return;
         }
 
         header('Content-Description: File Transfer');
@@ -179,6 +231,55 @@ class FileManager
         header('Content-Length: ' . filesize($path));
         readfile($path);
         exit;
+    }
+
+    /**
+     * 打包并下载文件夹
+     */
+    private function downloadFolder(string $path, string $foldername): void
+    {
+        if (!class_exists('ZipArchive')) {
+            throw new Exception("服务器未安装 ZipArchive 扩展，无法下载文件夹。");
+        }
+
+        $zipFile = tempnam(sys_get_temp_dir(), 'zip_');
+        $zip = new ZipArchive();
+        
+        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new Exception("无法创建 ZIP 文件。");
+        }
+
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+
+        foreach ($files as $file) {
+            $filePath = $file->getRealPath();
+            $relativePath = substr($filePath, strlen($path) + 1);
+            $zip->addFile($filePath, $relativePath);
+        }
+
+        $zip->close();
+
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $foldername . '.zip"');
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . filesize($zipFile));
+        readfile($zipFile);
+        unlink($zipFile);
+        exit;
+    }
+
+    /**
+     * 获取当前完整路径
+     */
+    public function getCurrentPath(): string
+    {
+        return $this->baseDir . ($this->relativePath ? '/' . $this->relativePath : '');
     }
 
     /**
@@ -214,11 +315,12 @@ class FileManager
     private function checkStorageQuota(int $newSize): void
     {
         $currentUsage = 0;
-        $scanned = scandir($this->baseDir);
-        
-        foreach ($scanned as $item) {
-            if ($item === '.' || $item === '..') continue;
-            $currentUsage += filesize($this->baseDir . '/' . $item);
+        // 递归计算所有文件大小
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($this->baseDir));
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $currentUsage += $file->getSize();
+            }
         }
 
         if (($currentUsage + $newSize) > MAX_STORAGE_LIMIT) {
@@ -239,6 +341,16 @@ class FileManager
 $fm = new FileManager(STORAGE_DIR);
 $fm->handleRequest();
 $files = $fm->getFiles();
+$currentPath = $_GET['path'] ?? '';
+
+// 生成面包屑导航数据
+$breadcrumbs = [];
+$pathParts = array_filter(explode('/', $currentPath));
+$crumbPath = '';
+foreach ($pathParts as $part) {
+    $crumbPath .= ($crumbPath ? '/' : '') . $part;
+    $breadcrumbs[] = ['name' => $part, 'path' => $crumbPath];
+}
 
 ?>
 <!DOCTYPE html>
@@ -264,6 +376,9 @@ $files = $fm->getFiles();
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
         <h3>📂 在线文件管理</h3>
         <div>
+            <button class="btn btn-warning me-2" data-bs-toggle="modal" data-bs-target="#folderModal">
+                <i class="bi bi-folder-plus"></i> 新建文件夹
+            </button>
             <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
                 <i class="bi bi-cloud-upload"></i> 上传文件
             </button>
@@ -272,6 +387,18 @@ $files = $fm->getFiles();
             </button>
         </div>
     </div>
+
+    <!-- 面包屑导航 -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb p-3 bg-light rounded">
+            <li class="breadcrumb-item"><a href="?path=" class="text-decoration-none"><i class="bi bi-house-door"></i> 根目录</a></li>
+            <?php foreach ($breadcrumbs as $crumb): ?>
+                <li class="breadcrumb-item active" aria-current="page">
+                    <a href="?path=<?= urlencode($crumb['path']) ?>" class="text-decoration-none"><?= htmlspecialchars($crumb['name']) ?></a>
+                </li>
+            <?php endforeach; ?>
+        </ol>
+    </nav>
 
     <!-- 消息提示 -->
     <?php if ($fm->message): ?>
@@ -299,13 +426,19 @@ $files = $fm->getFiles();
                 <?php foreach ($files as $file): ?>
                 <tr>
                     <td>
-                        <span class="text-primary">📄 <?= htmlspecialchars($file['name']) ?></span>
+                        <?php if ($file['is_dir']): ?>
+                            <a href="?path=<?= urlencode(($currentPath ? $currentPath . '/' : '') . $file['name']) ?>" class="text-decoration-none fw-bold text-dark">
+                                <i class="bi bi-folder-fill text-warning me-2"></i><?= htmlspecialchars($file['name']) ?>
+                            </a>
+                        <?php else: ?>
+                            <span class="text-primary"><i class="bi bi-file-earmark-text me-2"></i><?= htmlspecialchars($file['name']) ?></span>
+                        <?php endif; ?>
                     </td>
                     <td><?= $file['size'] ?></td>
                     <td><?= $file['time'] ?></td>
                     <td class="text-end">
                         <div class="d-flex flex-column flex-md-row gap-2 align-items-end justify-content-md-end">
-                            <a href="?action=download&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn"><i class="bi bi-download"></i> 下载</a>
+                            <a href="?action=download&path=<?= urlencode($currentPath) ?>&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn"><i class="bi bi-download"></i> 下载</a>
                             <form method="POST" onsubmit="return confirm('确定要删除 <?= htmlspecialchars($file['name']) ?> 吗？');">
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="filename" value="<?= htmlspecialchars($file['name']) ?>">
@@ -345,6 +478,31 @@ $files = $fm->getFiles();
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                     <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 新建文件夹模态框 -->
+<div class="modal fade" id="folderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">新建文件夹</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="create_folder">
+                    <div class="mb-3">
+                        <label class="form-label">文件夹名称</label>
+                        <input type="text" name="foldername" class="form-control" placeholder="New Folder" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning">创建</button>
                 </div>
             </form>
         </div>
