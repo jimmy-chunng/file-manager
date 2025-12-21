@@ -6,4 +6,5 @@ for my personal use only then share to you guys.
 
 screen shot:
 
-<img width="1592" height="732" alt="截屏2025-12-21 00 12 30" src="https://github.com/user-attachments/assets/b80f2206-97d2-4710-8988-1195838b3d11" />
+
+<img width="1680" height="742" alt="截屏2025-12-21 14 41 46" src="https://github.com/user-attachments/assets/826091da-c205-4ae9-a08b-da32fccf6239" />
