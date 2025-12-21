@@ -251,14 +251,17 @@ $files = $fm->getFiles();
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         body { background-color: #f8f9fa; padding-top: 2rem; }
-        .container { max-width: 900px; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 900px; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .action-btn { width: 80px; }
+        @media (min-width: 768px) {
+            .container { padding: 2rem; }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
         <h3>📂 在线文件管理</h3>
         <div>
             <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
@@ -279,6 +282,7 @@ $files = $fm->getFiles();
     <?php endif; ?>
 
     <!-- 文件列表 -->
+    <div class="table-responsive">
     <table class="table table-hover align-middle">
         <thead class="table-light">
             <tr>
@@ -300,18 +304,21 @@ $files = $fm->getFiles();
                     <td><?= $file['size'] ?></td>
                     <td><?= $file['time'] ?></td>
                     <td class="text-end">
-                        <a href="?action=download&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn me-1"><i class="bi bi-download"></i> 下载</a>
-                        <form method="POST" style="display:inline;" onsubmit="return confirm('确定要删除 <?= htmlspecialchars($file['name']) ?> 吗？');">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="filename" value="<?= htmlspecialchars($file['name']) ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger action-btn"><i class="bi bi-trash"></i> 删除</button>
-                        </form>
+                        <div class="d-flex flex-column flex-md-row gap-2 align-items-end justify-content-md-end">
+                            <a href="?action=download&filename=<?= urlencode($file['name']) ?>" class="btn btn-sm btn-outline-primary action-btn"><i class="bi bi-download"></i> 下载</a>
+                            <form method="POST" onsubmit="return confirm('确定要删除 <?= htmlspecialchars($file['name']) ?> 吗？');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="filename" value="<?= htmlspecialchars($file['name']) ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger action-btn"><i class="bi bi-trash"></i> 删除</button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
             <?php endif; ?>
         </tbody>
     </table>
+    </div>
 </div>
 
 <!-- 新建文件模态框 -->
