@@ -1,7 +1,7 @@
 <?php
 /**
  * Simple & Secure File Manager
- * Author: Gemini Code Assist
+ * Author: jimmy
  */
 
 // 配置：文件存储目录
